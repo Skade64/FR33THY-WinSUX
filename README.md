@@ -22,7 +22,7 @@ This guide is continuously updated with improvements and bug fixes. <br> Make su
 # IWR
 - Paste this code into an elevated Administrator PowerShell window.
 ```
-iwr https://github.com/FR33THYFR33THY/WinSux-Windows-Optimization-Guide/raw/refs/heads/main/WinSux.ps1 -useb | iex
+iwr https://github.com/FR33THYFR33THY/WinSux-Windows-Optimization-Guide/raw/refs/heads/main/Files/WinSux.ps1 -useb | iex
 ```
 
 ## Guide
