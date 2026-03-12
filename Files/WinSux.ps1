@@ -1751,33 +1751,17 @@ E0,F6,C5,D5,0E,CA,50,00,00
 
 
 ; NEW START MENU
-[HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\3036241548]
-"EnabledState"=dword:00000002
-"EnabledStateOptions"=dword:00000000
-
 [HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\2792562829]
 "EnabledState"=dword:00000002
-"EnabledStateOptions"=dword:00000000
 
-[HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\762256525]
+[HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\3036241548]
 "EnabledState"=dword:00000002
-"EnabledStateOptions"=dword:00000000
 
 [HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\734731404]
 "EnabledState"=dword:00000002
-"EnabledStateOptions"=dword:00000000
 
-[HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\2114784909]
+[HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\762256525]
 "EnabledState"=dword:00000002
-"EnabledStateOptions"=dword:00000000
-
-[HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\905601679]
-"EnabledState"=dword:00000002
-"EnabledStateOptions"=dword:00000000
-
-[HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\14\1853569164]
-"EnabledState"=dword:00000002
-"EnabledStateOptions"=dword:00000000
 
 ; set start menu apps view to list
 [HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Start]
@@ -2571,7 +2555,7 @@ $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Recycle Bin.lnk")
 $Shortcut.TargetPath = "$env:SystemRoot\explorer.exe"
 $Shortcut.Arguments = "shell:RecycleBinFolder"
-$Shortcut.IconLocation = "%SystemRoot%\System32\imageres.dll,50"
+$Shortcut.IconLocation = "%SystemRoot%\System32\imageres.dll,265"
 $Shortcut.Save()
 
 # hide accessibility accessories folders and all contents from start menu
@@ -4066,6 +4050,12 @@ cmd /c "reg add `"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel`"
         ## perfmon.msc
 cmd /c "cd /d %systemroot%\system32 && lodctr /R >nul 2>&1"
 cmd /c "cd /d %systemroot%\sysWOW64 && lodctr /R >nul 2>&1"
+
+# remove uwp apps pesky on ms account
+        ## ms-settings:appsfeatures
+        ## powershell -noexit -command "get-appxpackage | select name | format-table -autosize"
+Get-AppxPackage -allusers *MSTeams* | Remove-AppxPackage -ErrorAction SilentlyContinue
+Get-AppxPackage -allusers *Microsoft.OutlookForWindows* | Remove-AppxPackage -ErrorAction SilentlyContinue
 
 		Write-Host "DISK CLEANUP`n"
 		## cleanmgr.exe
