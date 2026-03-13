@@ -2746,12 +2746,13 @@ Get-ScheduledTask | Where-Object {$_.Taskname -match 'OneDrive'} | Unregister-Sc
 
 # uninstall remote desktop connection
 try {
-Start-Process "mstsc" -ArgumentList "/Uninstall"
+Start-Process "mstsc" -ArgumentList "/Uninstall" -ErrorAction SilentlyContinue
 } catch { }
 # silent window for remote desktop connection
 $processExists = Get-Process -Name mstsc -ErrorAction SilentlyContinue
 if ($processExists) {
 $running = $true
+$timeout = 0
 do {
 $mstscProcess = Get-Process -Name mstsc -ErrorAction SilentlyContinue
 if ($mstscProcess -and $mstscProcess.MainWindowHandle -ne 0) {
@@ -2759,18 +2760,24 @@ Stop-Process -Force -Name mstsc -ErrorAction SilentlyContinue | Out-Null
 $running = $false
 }
 Start-Sleep -Milliseconds 100
+$timeout++
+if ($timeout -gt 100) {
+Stop-Process -Name mstsc -Force -ErrorAction SilentlyContinue
+$running = $false
+}
 } while ($running)
 }
 Start-Sleep -Seconds 1
 
 # windows 10 uninstall old snipping tool
 try {
-Start-Process "C:\Windows\System32\SnippingTool.exe" -ArgumentList "/Uninstall"
+Start-Process "C:\Windows\System32\SnippingTool.exe" -ArgumentList "/Uninstall" -ErrorAction SilentlyContinue
 } catch { }
 # silent window for uninstall old snipping tool
 $processExists = Get-Process -Name SnippingTool -ErrorAction SilentlyContinue
 if ($processExists) {
 $running = $true
+$timeout = 0
 do {
 $snipProcess = Get-Process -Name SnippingTool -ErrorAction SilentlyContinue
 if ($snipProcess -and $snipProcess.MainWindowHandle -ne 0) {
@@ -2778,6 +2785,11 @@ Stop-Process -Force -Name SnippingTool -ErrorAction SilentlyContinue | Out-Null
 $running = $false
 }
 Start-Sleep -Milliseconds 100
+$timeout++
+if ($timeout -gt 100) {
+Stop-Process -Name SnippingTool -Force -ErrorAction SilentlyContinue
+$running = $false
+}
 } while ($running)
 }
 Start-Sleep -Seconds 1
