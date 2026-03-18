@@ -47,6 +47,9 @@
 
         Write-Host "youtube.com/FR3" -ForegroundColor White -NoNewline; Write-Host "3THY`n" -ForegroundColor Cyan
 
+# fix enter your pin hello face sign in bug allow password instead
+cmd /c "reg add `"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device`" /v `"DevicePasswordLessBuildVersion`" /t REG_DWORD /d `"0`" /f >nul 2>&1"
+
         Write-Host "7Z`n"
         ## explorer "https://www.7-zip.org"
 
@@ -2058,6 +2061,10 @@ E0,F6,C5,D5,0E,CA,50,00,00
 ; black powershell console
 [HKEY_CURRENT_USER\Console\%SystemRoot%_System32_WindowsPowerShell_v1.0_powershell.exe]
 "ScreenColors"=dword:0000000F
+
+; fix enter your pin hello face sign in bug allow password instead
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device]
+"DevicePasswordLessBuildVersion"=dword:00000000
 `'@
 Set-Content -Path "$env:SystemRoot\Temp\WindowsSettings.reg" -Value $regfilewindowssettings -Force
 

@@ -27,3 +27,4 @@ iwr https://github.com/FR33THYFR33THY/WinSux-Windows-Optimization-Guide/raw/refs
 - 3/16/2026 Added disable acpi power savings/wake on all connected devices
 - 3/16/2026 Added uninstall voice clarity driver
 - 3/18/2026 Better remove logon chrome
+- 3/18/2026 Added fix enter your pin hello face sign in bug allow password instead
