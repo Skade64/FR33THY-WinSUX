@@ -1863,19 +1863,6 @@ E0,F6,C5,D5,0E,CA,50,00,00
 [HKEY_CURRENT_USER\Control Panel\Mouse]
 "RawMouseThrottleEnabled"=dword:00000000
 
-; enable new nvme driver
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Policies\Microsoft\FeatureManagement\Overrides]
-"735209102"=dword:00000001
-"1853569164"=dword:00000001
-"156965516"=dword:00000001
-
-; enable safe & safe network boot fix for new nvme driver
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SafeBoot\Network\{75416E63-5912-4DFA-AE8F-3EFACCAFFB14}]
-@="Storage disks"
-
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\{75416E63-5912-4DFA-AE8F-3EFACCAFFB14}]
-@="Storage disks"
-
 
 
 
@@ -1996,10 +1983,6 @@ E0,F6,C5,D5,0E,CA,50,00,00
 ; black powershell console
 [HKEY_CURRENT_USER\Console\%SystemRoot%_System32_WindowsPowerShell_v1.0_powershell.exe]
 "ScreenColors"=dword:0000000F
-
-; fix enter your pin hello face sign in bug allow password instead
-[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device]
-"DevicePasswordLessBuildVersion"=dword:00000000
 `'@
 Set-Content -Path "$env:SystemRoot\Temp\WindowsSettings.reg" -Value $regfilewindowssettings -Force
 
@@ -2279,6 +2262,20 @@ Where-Object { $_.PSChildName -eq "Device Parameters" }
 foreach ($key in $usbKeys) {
 $regPath = $key.Name
 cmd /c "reg add `"$regPath`" /v `"WaitWakeEnabled`" /t REG_DWORD /d `"0`" /f >nul 2>&1"
+}
+
+# turn off windows write-cache buffer flushing on the device on all connected scsi devices
+$basePath = "HKLM:\SYSTEM\ControlSet001\Enum\SCSI"
+Get-ChildItem -Path $basePath -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq "Device Parameters" } | ForEach-Object {
+$diskPath = Join-Path $_.PSPath "Disk"
+cmd /c "reg add `"$(($diskPath -replace 'Microsoft.PowerShell.Core\\Registry::',''))`" /v `"CacheIsPowerProtected`" /t REG_DWORD /d `"1`" /f >nul 2>&1"
+}
+
+# turn off windows write-cache buffer flushing on the device on all connected nvme devices
+$basePath = "HKLM:\SYSTEM\ControlSet001\Enum\NVME"
+Get-ChildItem -Path $basePath -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq "Device Parameters" } | ForEach-Object {
+$diskPath = Join-Path $_.PSPath "Disk"
+cmd /c "reg add `"$(($diskPath -replace 'Microsoft.PowerShell.Core\\Registry::',''))`" /v `"CacheIsPowerProtected`" /t REG_DWORD /d `"1`" /f >nul 2>&1"
 }
 
 # import notepad settings
@@ -4172,7 +4169,16 @@ $EditStepTwoPs1 = "$env:SystemRoot\Temp\StepTwo.ps1"
 # install runonce steptwo ps1 file to run in normal boot
 cmd /c "reg add `"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce`" /v `"StepTwo`" /t REG_SZ /d `"powershell.exe -nop -ep bypass -WindowStyle Maximized -f $env:SystemRoot\Temp\StepTwo.ps1`" /f >nul 2>&1"
 
-# fix enter your pin hello face sign in bug allow password instead
+# enable new nvme driver
+cmd /c "reg add `"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Policies\Microsoft\FeatureManagement\Overrides`" /v `"735209102`" /t REG_DWORD /d `"1`" /f >nul 2>&1"
+cmd /c "reg add `"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Policies\Microsoft\FeatureManagement\Overrides`" /v `"1853569164`" /t REG_DWORD /d `"1`" /f >nul 2>&1"
+cmd /c "reg add `"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Policies\Microsoft\FeatureManagement\Overrides`" /v `"156965516`" /t REG_DWORD /d `"1`" /f >nul 2>&1"
+
+# enable safe & safe network boot fix for new nvme driver
+cmd /c "reg add `"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SafeBoot\Network\{75416E63-5912-4DFA-AE8F-3EFACCAFFB14}`" /ve /d `"Storage disks`" /f >nul 2>&1"
+cmd /c "reg add `"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\{75416E63-5912-4DFA-AE8F-3EFACCAFFB14}`" /ve /d `"Storage disks`" /f >nul 2>&1"
+
+# allow password sign in
 cmd /c "reg add `"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device`" /v `"DevicePasswordLessBuildVersion`" /t REG_DWORD /d `"0`" /f >nul 2>&1"
 
 # disable open terminal by default
