@@ -38,6 +38,323 @@
   		}
         }
 
+        Write-Host "REMOVE EDGE`n"
+        ## c:\program files (x86)\microsoft
+        ## powershell -NoExit -c "reg query 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages' | findstr 'Microsoft-Windows-Internet-Browser-Package' | findstr '~~'"
+
+# get region to revert later
+$Region = Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel\DeviceRegion' -Name DeviceRegion -ErrorAction SilentlyContinue
+
+# set region to us
+Copy-Item (Get-Command reg.exe).Source .\reg1.exe -Force -EA 0
+& .\reg1.exe add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel\DeviceRegion' /v DeviceRegion /t REG_DWORD /d 244 /f >$null
+
+# stop edge running
+$stop = "backgroundTaskHost", "Copilot", "CrossDeviceResume", "GameBar", "MicrosoftEdgeUpdate", "msedge", "msedgewebview2", "OneDrive", "OneDrive.Sync.Service", "OneDriveStandaloneUpdater", "Resume", "RuntimeBroker", "Search", "SearchHost", "Setup", "StoreDesktopExtension", "WidgetService", "Widgets"
+$stop | ForEach-Object { Stop-Process -Name $_ -Force -ErrorAction SilentlyContinue }
+Get-Process | Where-Object { $_.ProcessName -like "*edge*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+
+# find edgeupdate.exe
+$edgeupdate = @(); "LocalApplicationData", "ProgramFilesX86", "ProgramFiles" | ForEach-Object {
+$folder = [Environment]::GetFolderPath($_)
+$edgeupdate += Get-ChildItem "$folder\Microsoft\EdgeUpdate\*.*.*.*\MicrosoftEdgeUpdate.exe" -rec -ea 0
+}
+
+# find edgeupdate & allow uninstall regedit
+$global:REG = "HKCU:\SOFTWARE", "HKLM:\SOFTWARE", "HKCU:\SOFTWARE\Policies", "HKLM:\SOFTWARE\Policies", "HKCU:\SOFTWARE\WOW6432Node", "HKLM:\SOFTWARE\WOW6432Node", "HKCU:\SOFTWARE\WOW6432Node\Policies", "HKLM:\SOFTWARE\WOW6432Node\Policies"
+foreach ($location in $REG) { Remove-Item "$location\Microsoft\EdgeUpdate" -recurse -force -ErrorAction SilentlyContinue }
+
+# uninstall edgeupdate
+foreach ($path in $edgeupdate) {
+if (Test-Path $path) { Start-Process -Wait $path -Args "/unregsvc" | Out-Null }
+do { Start-Sleep 3 } while ((Get-Process -Name "setup", "MicrosoftEdge*" -ErrorAction SilentlyContinue).Path -like "*\Microsoft\Edge*")
+if (Test-Path $path) { Start-Process -Wait $path -Args "/uninstall" | Out-Null }
+do { Start-Sleep 3 } while ((Get-Process -Name "setup", "MicrosoftEdge*" -ErrorAction SilentlyContinue).Path -like "*\Microsoft\Edge*")
+}
+
+# new folder to uninstall edge
+New-Item -Path "$env:SystemRoot\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe" -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+
+# new file to uninstall edge
+New-Item -Path "$env:SystemRoot\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe" -ItemType File -Name "MicrosoftEdge.exe" -ErrorAction SilentlyContinue | Out-Null
+
+# find edge uninstall string
+$regview = [Microsoft.Win32.RegistryView]::Registry32
+$microsoft = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $regview).
+OpenSubKey("SOFTWARE\Microsoft", $true)
+$uninstallregkey = $microsoft.OpenSubKey("Windows\CurrentVersion\Uninstall\Microsoft Edge")
+try {
+$uninstallstring = $uninstallregkey.GetValue("UninstallString") + " --force-uninstall"
+} catch {
+}
+
+# uninstall edge
+Start-Process cmd.exe "/c $uninstallstring" -WindowStyle Hidden -Wait
+
+# clean folder file
+Remove-Item -Recurse -Force "$env:SystemRoot\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe" -ErrorAction SilentlyContinue | Out-Null
+
+# remove edgewebview uninstaller
+cmd /c "reg delete `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView`" /f >nul 2>&1"
+
+# remove edge shortcut
+Remove-Item -Recurse -Force "$env:SystemDrive\Windows\System32\config\systemprofile\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\Microsoft Edge.lnk" -ErrorAction SilentlyContinue | Out-Null
+
+# remove edge folders
+Remove-Item -Recurse -Force "$env:SystemDrive\Program Files (x86)\Microsoft" -ErrorAction SilentlyContinue | Out-Null
+
+# remove edge services
+$services = Get-Service | Where-Object { $_.Name -match 'Edge' }
+foreach ($service in $services) {
+cmd /c "sc stop `"$($service.Name)`" >nul 2>&1"
+cmd /c "sc delete `"$($service.Name)`" >nul 2>&1"
+}
+
+# windows 10 remove microsoft edge legacy package
+$EdgeLegacyPackage = (Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages" -ErrorAction SilentlyContinue |
+Where-Object { $_.PSChildName -like "*Microsoft-Windows-Internet-Browser-Package*~~*" }).PSChildName
+if ($EdgeLegacyPackage) {
+$regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages\$EdgeLegacyPackage"
+cmd /c "reg add `"$($regPath.Replace('HKLM:\', 'HKLM\'))`" /v Visibility /t REG_DWORD /d 1 /f >nul 2>&1"
+cmd /c "reg delete `"$($regPath.Replace('HKLM:\', 'HKLM\'))\Owners`" /va /f >nul 2>&1"
+dism /online /Remove-Package /PackageName:$EdgeLegacyPackage /quiet /norestart 2>$null | Out-Null
+}
+
+# revert region
+if ($Region) {
+& .\reg1.exe add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel\DeviceRegion' /v DeviceRegion /t REG_DWORD /d $Region /f >$null
+}
+Remove-Item .\reg1.exe -ErrorAction SilentlyContinue
+
+        Write-Host "REMOVE UWP APPS`n"
+        ## ms-settings:appsfeatures
+        ## powershell -noexit -command "get-appxpackage | select name | format-table -autosize"
+
+Get-AppXPackage -AllUsers | Where-Object {
+# breaks file explorer
+$_.Name -notlike '*CBS*' -and
+$_.Name -notlike '*Microsoft.AV1VideoExtension*' -and
+$_.Name -notlike '*Microsoft.AVCEncoderVideoExtension*' -and
+$_.Name -notlike '*Microsoft.HEIFImageExtension*' -and
+$_.Name -notlike '*Microsoft.HEVCVideoExtension*' -and
+$_.Name -notlike '*Microsoft.MPEG2VideoExtension*' -and
+$_.Name -notlike '*Microsoft.Paint*' -and
+$_.Name -notlike '*Microsoft.RawImageExtension*' -and
+# breaks windows server defender
+$_.Name -notlike '*Microsoft.SecHealthUI*' -and
+$_.Name -notlike '*Microsoft.VP9VideoExtensions*' -and
+$_.Name -notlike '*Microsoft.WebMediaExtensions*' -and
+$_.Name -notlike '*Microsoft.WebpImageExtension*' -and
+$_.Name -notlike '*Microsoft.Windows.Photos*' -and
+# breaks windows server task bar
+$_.Name -notlike '*Microsoft.Windows.ShellExperienceHost*' -and
+# breaks windows server start menu
+$_.Name -notlike '*Microsoft.Windows.StartMenuExperienceHost*' -and
+$_.Name -notlike '*Microsoft.WindowsNotepad*' -and
+$_.Name -notlike '*Microsoft.WindowsStore*' -and
+$_.Name -notlike '*NVIDIACorp.NVIDIAControlPanel*' -and
+# breaks windows server immersive control panel
+$_.Name -notlike '*windows.immersivecontrolpanel*'
+} | Remove-AppxPackage -ErrorAction SilentlyContinue
+
+        Write-Host "REMOVE UWP FEATURES`n"
+        ## ms-settings:optionalfeatures
+        ## powershell -noexit -command "dism /online /get-capabilities /format:table"
+
+Get-WindowsCapability -Online | Where-Object {
+$_.Name -notlike '*Microsoft.Windows.Ethernet*' -and
+# windows 10
+$_.Name -notlike '*Microsoft.Windows.MSPaint*' -and
+# windows 10
+$_.Name -notlike '*Microsoft.Windows.Notepad*' -and
+$_.Name -notlike '*Microsoft.Windows.Notepad.System*' -and
+$_.Name -notlike '*Microsoft.Windows.Wifi*' -and
+$_.Name -notlike '*NetFX3*' -and
+# windows 11 breaks msi installers if removed
+$_.Name -notlike '*VBSCRIPT*' -and
+# breaks monitoring programs
+$_.Name -notlike '*WMIC*' -and
+# windows 10 breaks uwp snippingtool if removed
+$_.Name -notlike '*Windows.Client.ShellComponents*'
+} | ForEach-Object {
+try {
+Remove-WindowsCapability -Online -Name $_.Name | Out-Null
+} catch { }
+}
+
+        Write-Host "REMOVE LEGACY FEATURES`n"
+        ## c:\windows\system32\optionalfeatures.exe
+		## powershell -noexit -command "dism /online /get-features /format:table"
+
+Get-WindowsOptionalFeature -Online | Where-Object {
+$_.FeatureName -notlike '*DirectPlay*' -and
+$_.FeatureName -notlike '*LegacyComponents*' -and
+$_.FeatureName -notlike '*NetFx3*' -and
+# breaks windows server turn windows features on or off
+$_.FeatureName -notlike '*NetFx4*' -and
+$_.FeatureName -notlike '*NetFx4-AdvSrvs*' -and
+# breaks windows server turn windows features on or off
+$_.FeatureName -notlike '*NetFx4ServerFeatures*' -and
+# breaks search
+$_.FeatureName -notlike '*SearchEngine-Client-Package*' -and
+# breaks windows server desktop
+$_.FeatureName -notlike '*Server-Shell*' -and
+# breaks windows server defender
+$_.FeatureName -notlike '*Windows-Defender*' -and
+# breaks windows server internet
+$_.FeatureName -notlike '*Server-Drivers-General*' -and
+# breaks windows server internet
+$_.FeatureName -notlike '*ServerCore-Drivers-General*' -and
+# breaks windows server internet
+$_.FeatureName -notlike '*ServerCore-Drivers-General-WOW64*' -and
+# breaks windows server turn windows features on or off
+$_.FeatureName -notlike '*Server-Gui-Mgmt*' -and
+# breaks windows server nvidia app
+$_.FeatureName -notlike '*WirelessNetworking*'
+} | ForEach-Object {
+try {
+Disable-WindowsOptionalFeature -Online -FeatureName $_.FeatureName -NoRestart -WarningAction SilentlyContinue | Out-Null
+} catch { }
+}
+
+		Write-Host "REMOVE LEGACY APPS`n"
+		## appwiz.cpl
+
+# uninstall brlapi
+cmd /c "sc stop `"brlapi`" >nul 2>&1"
+cmd /c "sc delete `"brlapi`" >nul 2>&1"
+cmd /c "takeown /f `"$env:SystemRoot\brltty`" /r /d y >nul 2>&1"
+cmd /c "icacls `"$env:SystemRoot\brltty`" /grant *S-1-5-32-544:F /t >nul 2>&1"
+Remove-Item "$env:SystemRoot\brltty" -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
+
+# uninstall microsoft gameinput
+$findmicrosoftgameinput = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+$microsoftgameinput = Get-ItemProperty $findmicrosoftgameinput -ErrorAction SilentlyContinue |
+Where-Object { $_.DisplayName -like "*Microsoft GameInput*" }
+if ($microsoftgameinput) {
+$guid = $microsoftgameinput.PSChildName
+Start-Process "msiexec.exe" -ArgumentList "/x $guid /qn /norestart" -Wait -NoNewWindow
+}
+
+# stop onedrive running
+Stop-Process -Force -Name OneDrive -ErrorAction SilentlyContinue | Out-Null
+
+# uninstall onedrive
+cmd /c "C:\Windows\System32\OneDriveSetup.exe -uninstall >nul 2>&1"
+# uninstall office 365 onedrive
+Get-ChildItem -Path "C:\Program Files*\Microsoft OneDrive", "$env:LOCALAPPDATA\Microsoft\OneDrive" -Filter "OneDriveSetup.exe" -Recurse -ErrorAction SilentlyContinue |
+ForEach-Object { Start-Process -Wait $_.FullName -ArgumentList "/uninstall /allusers" -WindowStyle Hidden -ErrorAction SilentlyContinue }
+# windows 10 uninstall onedrive
+cmd /c "C:\Windows\SysWOW64\OneDriveSetup.exe -uninstall >nul 2>&1"
+# windows 10 remove onedrive scheduled tasks
+Get-ScheduledTask | Where-Object {$_.Taskname -match 'OneDrive'} | Unregister-ScheduledTask -Confirm:$false
+
+# uninstall remote desktop connection
+try {
+Start-Process "mstsc" -ArgumentList "/Uninstall" -ErrorAction SilentlyContinue
+} catch { }
+# silent window for remote desktop connection
+$processExists = Get-Process -Name mstsc -ErrorAction SilentlyContinue
+if ($processExists) {
+$running = $true
+$timeout = 0
+do {
+$mstscProcess = Get-Process -Name mstsc -ErrorAction SilentlyContinue
+if ($mstscProcess -and $mstscProcess.MainWindowHandle -ne 0) {
+Stop-Process -Force -Name mstsc -ErrorAction SilentlyContinue | Out-Null
+$running = $false
+}
+Start-Sleep -Milliseconds 100
+$timeout++
+if ($timeout -gt 100) {
+Stop-Process -Name mstsc -Force -ErrorAction SilentlyContinue
+$running = $false
+}
+} while ($running)
+}
+Start-Sleep -Seconds 1
+
+# windows 10 uninstall old snipping tool
+try {
+Start-Process "C:\Windows\System32\SnippingTool.exe" -ArgumentList "/Uninstall" -ErrorAction SilentlyContinue
+} catch { }
+# silent window for uninstall old snipping tool
+$processExists = Get-Process -Name SnippingTool -ErrorAction SilentlyContinue
+if ($processExists) {
+$running = $true
+$timeout = 0
+do {
+$snipProcess = Get-Process -Name SnippingTool -ErrorAction SilentlyContinue
+if ($snipProcess -and $snipProcess.MainWindowHandle -ne 0) {
+Stop-Process -Force -Name SnippingTool -ErrorAction SilentlyContinue | Out-Null
+$running = $false
+}
+Start-Sleep -Milliseconds 100
+$timeout++
+if ($timeout -gt 100) {
+Stop-Process -Name SnippingTool -Force -ErrorAction SilentlyContinue
+$running = $false
+}
+} while ($running)
+}
+Start-Sleep -Seconds 1
+
+# windows 10 uninstall update for windows 10 for x64-based systems
+$findupdateforwindows = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+$updateforwindows = Get-ItemProperty $findupdateforwindows -ErrorAction SilentlyContinue |
+Where-Object { $_.DisplayName -like "*Update for x64-based Windows Systems*" }
+if ($updateforwindows) {
+$guid = $updateforwindows.PSChildName
+Start-Process "msiexec.exe" -ArgumentList "/x $guid /qn /norestart" -Wait -NoNewWindow
+}
+
+# windows 10 uninstall microsoft update health tools
+$findupdatehealthtools = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+$updatehealthtools = Get-ItemProperty $findupdatehealthtools -ErrorAction SilentlyContinue |
+Where-Object { $_.DisplayName -like "*Microsoft Update Health Tools*" }
+if ($updatehealthtools) {
+$guid = $updatehealthtools.PSChildName
+Start-Process "msiexec.exe" -ArgumentList "/x $guid /qn /norestart" -Wait -NoNewWindow
+}
+cmd /c "reg delete `"HKLM\SYSTEM\ControlSet001\Services\uhssvc`" /f >nul 2>&1"
+Unregister-ScheduledTask -TaskName PLUGScheduler -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+
+# remove 3rd party startup apps
+        ## taskmgr /0 /startup
+        ## ms-settings:startupapps
+cmd /c "reg delete `"HKCU\Software\Microsoft\Windows\CurrentVersion\RunNotification`" /f >nul 2>&1"
+cmd /c "reg add `"HKCU\Software\Microsoft\Windows\CurrentVersion\RunNotification`" /f >nul 2>&1"
+cmd /c "reg delete `"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
+cmd /c "reg add `"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
+cmd /c "reg delete `"HKCU\Software\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
+cmd /c "reg add `"HKCU\Software\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
+cmd /c "reg delete `"HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
+cmd /c "reg add `"HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
+cmd /c "reg delete `"HKLM\Software\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
+cmd /c "reg add `"HKLM\Software\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
+cmd /c "reg delete `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
+cmd /c "reg add `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
+cmd /c "reg delete `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
+cmd /c "reg add `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
+Remove-Item -Recurse -Force "$env:AppData\Microsoft\Windows\Start Menu\Programs\Startup" -ErrorAction SilentlyContinue | Out-Null
+Remove-Item -Recurse -Force "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp" -ErrorAction SilentlyContinue | Out-Null
+New-Item -Path "$env:AppData\Microsoft\Windows\Start Menu\Programs\Startup" -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+New-Item -Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp" -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+
+# remove 3rd party scheduled tasks
+        ## taskschd.msc
+		## regedit HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree
+		## C:\Windows\System32\Tasks
+$treePath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree"
+Get-ChildItem $treePath | Where-Object { $_.PSChildName -ne "Microsoft" } | ForEach-Object {
+Run-Trusted "Remove-Item '$($_.PSPath)' -Recurse -Force"
+}
+
+$tasksPath = "$env:SystemRoot\System32\Tasks"
+Get-ChildItem $tasksPath | Where-Object { $_.Name -ne "Microsoft" } | ForEach-Object {
+Remove-Item $_.FullName -Recurse -Force
+}
+
         Write-Host "STORE SETTINGS`n"
         ## ms-windows-store:settings
 
@@ -603,323 +920,6 @@ cmd /c "reg add `"HKCU\Software\Microsoft\Windows\CurrentVersion\Start`" /v `"Al
 # restart explorer
 Stop-Process -Force -Name explorer -ErrorAction SilentlyContinue | Out-Null
 Start-Sleep -Seconds 10
-
-        Write-Host "REMOVE EDGE`n"
-        ## c:\program files (x86)\microsoft
-        ## powershell -NoExit -c "reg query 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages' | findstr 'Microsoft-Windows-Internet-Browser-Package' | findstr '~~'"
-
-# get region to revert later
-$Region = Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel\DeviceRegion' -Name DeviceRegion -ErrorAction SilentlyContinue
-
-# set region to us
-Copy-Item (Get-Command reg.exe).Source .\reg1.exe -Force -EA 0
-& .\reg1.exe add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel\DeviceRegion' /v DeviceRegion /t REG_DWORD /d 244 /f >$null
-
-# stop edge running
-$stop = "backgroundTaskHost", "Copilot", "CrossDeviceResume", "GameBar", "MicrosoftEdgeUpdate", "msedge", "msedgewebview2", "OneDrive", "OneDrive.Sync.Service", "OneDriveStandaloneUpdater", "Resume", "RuntimeBroker", "Search", "SearchHost", "Setup", "StoreDesktopExtension", "WidgetService", "Widgets"
-$stop | ForEach-Object { Stop-Process -Name $_ -Force -ErrorAction SilentlyContinue }
-Get-Process | Where-Object { $_.ProcessName -like "*edge*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-
-# find edgeupdate.exe
-$edgeupdate = @(); "LocalApplicationData", "ProgramFilesX86", "ProgramFiles" | ForEach-Object {
-$folder = [Environment]::GetFolderPath($_)
-$edgeupdate += Get-ChildItem "$folder\Microsoft\EdgeUpdate\*.*.*.*\MicrosoftEdgeUpdate.exe" -rec -ea 0
-}
-
-# find edgeupdate & allow uninstall regedit
-$global:REG = "HKCU:\SOFTWARE", "HKLM:\SOFTWARE", "HKCU:\SOFTWARE\Policies", "HKLM:\SOFTWARE\Policies", "HKCU:\SOFTWARE\WOW6432Node", "HKLM:\SOFTWARE\WOW6432Node", "HKCU:\SOFTWARE\WOW6432Node\Policies", "HKLM:\SOFTWARE\WOW6432Node\Policies"
-foreach ($location in $REG) { Remove-Item "$location\Microsoft\EdgeUpdate" -recurse -force -ErrorAction SilentlyContinue }
-
-# uninstall edgeupdate
-foreach ($path in $edgeupdate) {
-if (Test-Path $path) { Start-Process -Wait $path -Args "/unregsvc" | Out-Null }
-do { Start-Sleep 3 } while ((Get-Process -Name "setup", "MicrosoftEdge*" -ErrorAction SilentlyContinue).Path -like "*\Microsoft\Edge*")
-if (Test-Path $path) { Start-Process -Wait $path -Args "/uninstall" | Out-Null }
-do { Start-Sleep 3 } while ((Get-Process -Name "setup", "MicrosoftEdge*" -ErrorAction SilentlyContinue).Path -like "*\Microsoft\Edge*")
-}
-
-# new folder to uninstall edge
-New-Item -Path "$env:SystemRoot\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe" -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
-
-# new file to uninstall edge
-New-Item -Path "$env:SystemRoot\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe" -ItemType File -Name "MicrosoftEdge.exe" -ErrorAction SilentlyContinue | Out-Null
-
-# find edge uninstall string
-$regview = [Microsoft.Win32.RegistryView]::Registry32
-$microsoft = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $regview).
-OpenSubKey("SOFTWARE\Microsoft", $true)
-$uninstallregkey = $microsoft.OpenSubKey("Windows\CurrentVersion\Uninstall\Microsoft Edge")
-try {
-$uninstallstring = $uninstallregkey.GetValue("UninstallString") + " --force-uninstall"
-} catch {
-}
-
-# uninstall edge
-Start-Process cmd.exe "/c $uninstallstring" -WindowStyle Hidden -Wait
-
-# clean folder file
-Remove-Item -Recurse -Force "$env:SystemRoot\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe" -ErrorAction SilentlyContinue | Out-Null
-
-# remove edgewebview uninstaller
-cmd /c "reg delete `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView`" /f >nul 2>&1"
-
-# remove edge shortcut
-Remove-Item -Recurse -Force "$env:SystemDrive\Windows\System32\config\systemprofile\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\Microsoft Edge.lnk" -ErrorAction SilentlyContinue | Out-Null
-
-# remove edge folders
-Remove-Item -Recurse -Force "$env:SystemDrive\Program Files (x86)\Microsoft" -ErrorAction SilentlyContinue | Out-Null
-
-# remove edge services
-$services = Get-Service | Where-Object { $_.Name -match 'Edge' }
-foreach ($service in $services) {
-cmd /c "sc stop `"$($service.Name)`" >nul 2>&1"
-cmd /c "sc delete `"$($service.Name)`" >nul 2>&1"
-}
-
-# windows 10 remove microsoft edge legacy package
-$EdgeLegacyPackage = (Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages" -ErrorAction SilentlyContinue |
-Where-Object { $_.PSChildName -like "*Microsoft-Windows-Internet-Browser-Package*~~*" }).PSChildName
-if ($EdgeLegacyPackage) {
-$regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages\$EdgeLegacyPackage"
-cmd /c "reg add `"$($regPath.Replace('HKLM:\', 'HKLM\'))`" /v Visibility /t REG_DWORD /d 1 /f >nul 2>&1"
-cmd /c "reg delete `"$($regPath.Replace('HKLM:\', 'HKLM\'))\Owners`" /va /f >nul 2>&1"
-dism /online /Remove-Package /PackageName:$EdgeLegacyPackage /quiet /norestart 2>$null | Out-Null
-}
-
-# revert region
-if ($Region) {
-& .\reg1.exe add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel\DeviceRegion' /v DeviceRegion /t REG_DWORD /d $Region /f >$null
-}
-Remove-Item .\reg1.exe -ErrorAction SilentlyContinue
-
-        Write-Host "REMOVE UWP APPS`n"
-        ## ms-settings:appsfeatures
-        ## powershell -noexit -command "get-appxpackage | select name | format-table -autosize"
-
-Get-AppXPackage -AllUsers | Where-Object {
-# breaks file explorer
-$_.Name -notlike '*CBS*' -and
-$_.Name -notlike '*Microsoft.AV1VideoExtension*' -and
-$_.Name -notlike '*Microsoft.AVCEncoderVideoExtension*' -and
-$_.Name -notlike '*Microsoft.HEIFImageExtension*' -and
-$_.Name -notlike '*Microsoft.HEVCVideoExtension*' -and
-$_.Name -notlike '*Microsoft.MPEG2VideoExtension*' -and
-$_.Name -notlike '*Microsoft.Paint*' -and
-$_.Name -notlike '*Microsoft.RawImageExtension*' -and
-# breaks windows server defender
-$_.Name -notlike '*Microsoft.SecHealthUI*' -and
-$_.Name -notlike '*Microsoft.VP9VideoExtensions*' -and
-$_.Name -notlike '*Microsoft.WebMediaExtensions*' -and
-$_.Name -notlike '*Microsoft.WebpImageExtension*' -and
-$_.Name -notlike '*Microsoft.Windows.Photos*' -and
-# breaks windows server task bar
-$_.Name -notlike '*Microsoft.Windows.ShellExperienceHost*' -and
-# breaks windows server start menu
-$_.Name -notlike '*Microsoft.Windows.StartMenuExperienceHost*' -and
-$_.Name -notlike '*Microsoft.WindowsNotepad*' -and
-$_.Name -notlike '*Microsoft.WindowsStore*' -and
-$_.Name -notlike '*NVIDIACorp.NVIDIAControlPanel*' -and
-# breaks windows server immersive control panel
-$_.Name -notlike '*windows.immersivecontrolpanel*'
-} | Remove-AppxPackage -ErrorAction SilentlyContinue
-
-        Write-Host "REMOVE UWP FEATURES`n"
-        ## ms-settings:optionalfeatures
-        ## powershell -noexit -command "dism /online /get-capabilities /format:table"
-
-Get-WindowsCapability -Online | Where-Object {
-$_.Name -notlike '*Microsoft.Windows.Ethernet*' -and
-# windows 10
-$_.Name -notlike '*Microsoft.Windows.MSPaint*' -and
-# windows 10
-$_.Name -notlike '*Microsoft.Windows.Notepad*' -and
-$_.Name -notlike '*Microsoft.Windows.Notepad.System*' -and
-$_.Name -notlike '*Microsoft.Windows.Wifi*' -and
-$_.Name -notlike '*NetFX3*' -and
-# windows 11 breaks msi installers if removed
-$_.Name -notlike '*VBSCRIPT*' -and
-# breaks monitoring programs
-$_.Name -notlike '*WMIC*' -and
-# windows 10 breaks uwp snippingtool if removed
-$_.Name -notlike '*Windows.Client.ShellComponents*'
-} | ForEach-Object {
-try {
-Remove-WindowsCapability -Online -Name $_.Name | Out-Null
-} catch { }
-}
-
-        Write-Host "REMOVE LEGACY FEATURES`n"
-        ## c:\windows\system32\optionalfeatures.exe
-		## powershell -noexit -command "dism /online /get-features /format:table"
-
-Get-WindowsOptionalFeature -Online | Where-Object {
-$_.FeatureName -notlike '*DirectPlay*' -and
-$_.FeatureName -notlike '*LegacyComponents*' -and
-$_.FeatureName -notlike '*NetFx3*' -and
-# breaks windows server turn windows features on or off
-$_.FeatureName -notlike '*NetFx4*' -and
-$_.FeatureName -notlike '*NetFx4-AdvSrvs*' -and
-# breaks windows server turn windows features on or off
-$_.FeatureName -notlike '*NetFx4ServerFeatures*' -and
-# breaks search
-$_.FeatureName -notlike '*SearchEngine-Client-Package*' -and
-# breaks windows server desktop
-$_.FeatureName -notlike '*Server-Shell*' -and
-# breaks windows server defender
-$_.FeatureName -notlike '*Windows-Defender*' -and
-# breaks windows server internet
-$_.FeatureName -notlike '*Server-Drivers-General*' -and
-# breaks windows server internet
-$_.FeatureName -notlike '*ServerCore-Drivers-General*' -and
-# breaks windows server internet
-$_.FeatureName -notlike '*ServerCore-Drivers-General-WOW64*' -and
-# breaks windows server turn windows features on or off
-$_.FeatureName -notlike '*Server-Gui-Mgmt*' -and
-# breaks windows server nvidia app
-$_.FeatureName -notlike '*WirelessNetworking*'
-} | ForEach-Object {
-try {
-Disable-WindowsOptionalFeature -Online -FeatureName $_.FeatureName -NoRestart -WarningAction SilentlyContinue | Out-Null
-} catch { }
-}
-
-		Write-Host "REMOVE LEGACY APPS`n"
-		## appwiz.cpl
-
-# uninstall brlapi
-cmd /c "sc stop `"brlapi`" >nul 2>&1"
-cmd /c "sc delete `"brlapi`" >nul 2>&1"
-cmd /c "takeown /f `"$env:SystemRoot\brltty`" /r /d y >nul 2>&1"
-cmd /c "icacls `"$env:SystemRoot\brltty`" /grant *S-1-5-32-544:F /t >nul 2>&1"
-Remove-Item "$env:SystemRoot\brltty" -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
-
-# uninstall microsoft gameinput
-$findmicrosoftgameinput = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
-$microsoftgameinput = Get-ItemProperty $findmicrosoftgameinput -ErrorAction SilentlyContinue |
-Where-Object { $_.DisplayName -like "*Microsoft GameInput*" }
-if ($microsoftgameinput) {
-$guid = $microsoftgameinput.PSChildName
-Start-Process "msiexec.exe" -ArgumentList "/x $guid /qn /norestart" -Wait -NoNewWindow
-}
-
-# stop onedrive running
-Stop-Process -Force -Name OneDrive -ErrorAction SilentlyContinue | Out-Null
-
-# uninstall onedrive
-cmd /c "C:\Windows\System32\OneDriveSetup.exe -uninstall >nul 2>&1"
-# uninstall office 365 onedrive
-Get-ChildItem -Path "C:\Program Files*\Microsoft OneDrive", "$env:LOCALAPPDATA\Microsoft\OneDrive" -Filter "OneDriveSetup.exe" -Recurse -ErrorAction SilentlyContinue |
-ForEach-Object { Start-Process -Wait $_.FullName -ArgumentList "/uninstall /allusers" -WindowStyle Hidden -ErrorAction SilentlyContinue }
-# windows 10 uninstall onedrive
-cmd /c "C:\Windows\SysWOW64\OneDriveSetup.exe -uninstall >nul 2>&1"
-# windows 10 remove onedrive scheduled tasks
-Get-ScheduledTask | Where-Object {$_.Taskname -match 'OneDrive'} | Unregister-ScheduledTask -Confirm:$false
-
-# uninstall remote desktop connection
-try {
-Start-Process "mstsc" -ArgumentList "/Uninstall" -ErrorAction SilentlyContinue
-} catch { }
-# silent window for remote desktop connection
-$processExists = Get-Process -Name mstsc -ErrorAction SilentlyContinue
-if ($processExists) {
-$running = $true
-$timeout = 0
-do {
-$mstscProcess = Get-Process -Name mstsc -ErrorAction SilentlyContinue
-if ($mstscProcess -and $mstscProcess.MainWindowHandle -ne 0) {
-Stop-Process -Force -Name mstsc -ErrorAction SilentlyContinue | Out-Null
-$running = $false
-}
-Start-Sleep -Milliseconds 100
-$timeout++
-if ($timeout -gt 100) {
-Stop-Process -Name mstsc -Force -ErrorAction SilentlyContinue
-$running = $false
-}
-} while ($running)
-}
-Start-Sleep -Seconds 1
-
-# windows 10 uninstall old snipping tool
-try {
-Start-Process "C:\Windows\System32\SnippingTool.exe" -ArgumentList "/Uninstall" -ErrorAction SilentlyContinue
-} catch { }
-# silent window for uninstall old snipping tool
-$processExists = Get-Process -Name SnippingTool -ErrorAction SilentlyContinue
-if ($processExists) {
-$running = $true
-$timeout = 0
-do {
-$snipProcess = Get-Process -Name SnippingTool -ErrorAction SilentlyContinue
-if ($snipProcess -and $snipProcess.MainWindowHandle -ne 0) {
-Stop-Process -Force -Name SnippingTool -ErrorAction SilentlyContinue | Out-Null
-$running = $false
-}
-Start-Sleep -Milliseconds 100
-$timeout++
-if ($timeout -gt 100) {
-Stop-Process -Name SnippingTool -Force -ErrorAction SilentlyContinue
-$running = $false
-}
-} while ($running)
-}
-Start-Sleep -Seconds 1
-
-# windows 10 uninstall update for windows 10 for x64-based systems
-$findupdateforwindows = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
-$updateforwindows = Get-ItemProperty $findupdateforwindows -ErrorAction SilentlyContinue |
-Where-Object { $_.DisplayName -like "*Update for x64-based Windows Systems*" }
-if ($updateforwindows) {
-$guid = $updateforwindows.PSChildName
-Start-Process "msiexec.exe" -ArgumentList "/x $guid /qn /norestart" -Wait -NoNewWindow
-}
-
-# windows 10 uninstall microsoft update health tools
-$findupdatehealthtools = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
-$updatehealthtools = Get-ItemProperty $findupdatehealthtools -ErrorAction SilentlyContinue |
-Where-Object { $_.DisplayName -like "*Microsoft Update Health Tools*" }
-if ($updatehealthtools) {
-$guid = $updatehealthtools.PSChildName
-Start-Process "msiexec.exe" -ArgumentList "/x $guid /qn /norestart" -Wait -NoNewWindow
-}
-cmd /c "reg delete `"HKLM\SYSTEM\ControlSet001\Services\uhssvc`" /f >nul 2>&1"
-Unregister-ScheduledTask -TaskName PLUGScheduler -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-
-# remove 3rd party startup apps
-        ## taskmgr /0 /startup
-        ## ms-settings:startupapps
-cmd /c "reg delete `"HKCU\Software\Microsoft\Windows\CurrentVersion\RunNotification`" /f >nul 2>&1"
-cmd /c "reg add `"HKCU\Software\Microsoft\Windows\CurrentVersion\RunNotification`" /f >nul 2>&1"
-cmd /c "reg delete `"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
-cmd /c "reg add `"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
-cmd /c "reg delete `"HKCU\Software\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
-cmd /c "reg add `"HKCU\Software\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
-cmd /c "reg delete `"HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
-cmd /c "reg add `"HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
-cmd /c "reg delete `"HKLM\Software\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
-cmd /c "reg add `"HKLM\Software\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
-cmd /c "reg delete `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
-cmd /c "reg add `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce`" /f >nul 2>&1"
-cmd /c "reg delete `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
-cmd /c "reg add `"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run`" /f >nul 2>&1"
-Remove-Item -Recurse -Force "$env:AppData\Microsoft\Windows\Start Menu\Programs\Startup" -ErrorAction SilentlyContinue | Out-Null
-Remove-Item -Recurse -Force "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp" -ErrorAction SilentlyContinue | Out-Null
-New-Item -Path "$env:AppData\Microsoft\Windows\Start Menu\Programs\Startup" -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
-New-Item -Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp" -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
-
-# remove 3rd party scheduled tasks
-        ## taskschd.msc
-		## regedit HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree
-		## C:\Windows\System32\Tasks
-$treePath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree"
-Get-ChildItem $treePath | Where-Object { $_.PSChildName -ne "Microsoft" } | ForEach-Object {
-Run-Trusted "Remove-Item '$($_.PSPath)' -Recurse -Force"
-}
-
-$tasksPath = "$env:SystemRoot\System32\Tasks"
-Get-ChildItem $tasksPath | Where-Object { $_.Name -ne "Microsoft" } | ForEach-Object {
-Remove-Item $_.FullName -Recurse -Force
-}
 
         # FUNCTION SHOW-MENU
         function Show-Menu {
